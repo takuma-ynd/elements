@@ -15,16 +15,24 @@ class Logger:
     self._last_time = None
     self._metrics = []
 
-  def add(self, mapping, prefix=None):
+  def add(self, mapping, prefix=None, val_type=None):
     step = int(self._step) * self._multiplier
     for name, value in dict(mapping).items():
       name = f'{prefix}_{name}' if prefix else name
       value = np.array(value)
-      if len(value.shape) not in (0, 2, 3, 4):
-        raise ValueError(
-            f"Shape {value.shape} for name '{name}' cannot be "
-            "interpreted as scalar, image, or video.")
-      self._metrics.append((step, name, value))
+
+      # Guess val_type
+      if val_type is None:
+        if len(value.shape) == 0:
+          val_type = 'scalar'
+        elif len(value.shape) in [2, 3]:
+          val_type = 'image'
+        elif len(value.shape) == 4:
+          val_type = 'video'
+        else:
+          raise ValueError(f'invalid value.shape: {value.shape}\nIf you intend to log histograms, explicitly specify val_type.')
+
+      self._metrics.append((step, name, value, val_type))
 
   def scalar(self, name, value):
     self.add({name: value})
@@ -59,8 +67,8 @@ class Logger:
 class TerminalOutput:
 
   def __call__(self, summaries):
-    step = max(s for s, _, _, in summaries)
-    scalars = {k: float(v) for _, k, v in summaries if len(v.shape) == 0}
+    step = max(s for s, _, _, _ in summaries)
+    scalars = {k: float(v) for _, k, v, _ in summaries if len(v.shape) == 0}
     formatted = {k: self._format_value(v) for k, v in scalars.items()}
     print(f'[{step}]', ' / '.join(f'{k} {v}' for k, v in formatted.items()))
 
@@ -88,8 +96,8 @@ class JSONLOutput:
     self._logdir = pathlib.Path(logdir)
 
   def __call__(self, summaries):
-    scalars = {k: float(v) for _, k, v in summaries if len(v.shape) == 0}
-    step = max(s for s, _, _, in summaries)
+    scalars = {k: float(v) for _, k, v, _ in summaries if len(v.shape) == 0}
+    step = max(s for s, _, _, _ in summaries)
     with (self._logdir / 'metrics.jsonl').open('a') as f:
       f.write(json.dumps({'step': step, **scalars}) + '\n')
 
@@ -104,15 +112,15 @@ class TensorBoardOutput:
   def __call__(self, summaries):
     import tensorflow as tf
     self._writer.set_as_default()
-    for step, name, value in summaries:
-      if len(value.shape) == 0:
+    for step, name, value, val_type in summaries:
+      if val_type == 'scalar':
         tf.summary.scalar('scalars/' + name, value, step)
-      elif len(value.shape) == 2:
+      elif val_type == 'image':
         tf.summary.image(name, value, step)
-      elif len(value.shape) == 3:
-        tf.summary.image(name, value, step)
-      elif len(value.shape) == 4:
+      elif val_type == 'video':
         self._video_summary(name, value, step)
+      elif val_type == 'histogram':
+        tf.summary.histogram(name, value, step)
     self._writer.flush()
 
   def _video_summary(self, name, video, step):
