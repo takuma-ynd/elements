@@ -4,6 +4,17 @@ import time
 
 import numpy as np
 
+def disable_gpu():
+  import tensorflow as tf
+  try:
+    # Disable all GPUS
+    tf.config.set_visible_devices([], 'GPU')
+    visible_devices = tf.config.get_visible_devices()
+    for device in visible_devices:
+        assert device.device_type != 'GPU'
+  except:
+    # Invalid device or cannot modify virtual devices once initialized.
+    pass
 
 class Logger:
 
@@ -106,6 +117,7 @@ class TensorBoardOutput:
 
   def __init__(self, logdir, fps=20):
     import tensorflow as tf
+    disable_gpu()
     self._writer = tf.summary.create_file_writer(str(logdir), max_queue=1000)
     self._fps = fps
 
